@@ -44,14 +44,7 @@ function isH3SwallowedErrorBody(body: string): boolean {
   }
 }
 
-// Sites allowed to embed the player (iframe) and call the stream endpoint.
-const EMBED_ORIGINS = [
-  "https://pwcacorner.vercel.app",
-  "https://hrtgksgdjd.vercel.app",
-];
-
 function withEmbedHeaders(request: Request, response: Response): Response {
-  void EMBED_ORIGINS;
   const headers = new Headers(response.headers);
   headers.delete("x-frame-options");
   // Any site may embed the player.
@@ -76,10 +69,13 @@ export default {
       return withEmbedHeaders(request, await normalizeCatastrophicSsrResponse(response));
     } catch (error) {
       console.error(error);
-      return new Response(renderErrorPage(), {
-        status: 500,
-        headers: { "content-type": "text/html; charset=utf-8" },
-      });
+      return withEmbedHeaders(
+        request,
+        new Response(renderErrorPage(), {
+          status: 500,
+          headers: { "content-type": "text/html; charset=utf-8" },
+        }),
+      );
     }
   },
 };

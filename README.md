@@ -30,10 +30,8 @@ npm run dev
 
 ## External player integration
 
-The deployed player can be embedded only by these approved sites:
-
-- `https://pwcacorner.vercel.app`
-- `https://hrtgksgdjd.vercel.app`
+The deployed player can be embedded by any HTTPS site, including
+`https://pwcacorner.vercel.app` and `https://hrtgksgdjd.vercel.app`.
 
 ### Lecture links
 
