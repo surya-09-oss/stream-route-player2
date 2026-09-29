@@ -51,20 +51,17 @@ const EMBED_ORIGINS = [
 ];
 
 function withEmbedHeaders(request: Request, response: Response): Response {
+  void EMBED_ORIGINS;
   const headers = new Headers(response.headers);
   headers.delete("x-frame-options");
-  headers.set(
-    "content-security-policy",
-    `frame-ancestors 'self' ${EMBED_ORIGINS.join(" ")} https://*.lovable.app https://*.lovableproject.com`,
-  );
+  // Any site may embed the player.
+  headers.set("content-security-policy", "frame-ancestors *");
   const origin = request.headers.get("origin");
-  if (origin && EMBED_ORIGINS.includes(origin)) {
-    headers.set("access-control-allow-origin", origin);
-    headers.set("access-control-allow-methods", "GET, HEAD, OPTIONS");
-    headers.set("access-control-allow-headers", "range, content-type");
-    headers.set("access-control-expose-headers", "content-length, content-range, accept-ranges");
-    headers.append("vary", "origin");
-  }
+  headers.set("access-control-allow-origin", origin || "*");
+  headers.set("access-control-allow-methods", "GET, HEAD, OPTIONS");
+  headers.set("access-control-allow-headers", "range, content-type");
+  headers.set("access-control-expose-headers", "content-length, content-range, accept-ranges");
+  headers.append("vary", "origin");
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
