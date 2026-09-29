@@ -111,7 +111,7 @@ function videoDetailsFrom(row: Record<string, unknown>) {
 }
 
 export const resolveLecture = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) => lectureIds.parse(input))
+  .validator((input: unknown) => lectureIds.parse(input))
   .handler(async ({ data }) => {
     const { playerBase } = config();
     const streamKey = clean(process.env["VIDEO_STREAM_KEY"]);
