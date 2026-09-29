@@ -56,16 +56,30 @@ export function VideoPlayer({ route, format, poster, autoPlay }: {
         } else {
           const Hls = (await import("hls.js")).default;
           if (cancelled) return;
-          const hls = new Hls({ enableWorker: true, lowLatencyMode: false });
+          const hls = new Hls({
+            enableWorker: true,
+            lowLatencyMode: false,
+            // This provider uses unusually large five-minute fragments. The
+            // default timeout restarts the same fragment before it finishes.
+            fragLoadingTimeOut: 120_000,
+            fragLoadingMaxRetry: 4,
+            fragLoadingRetryDelay: 1_000,
+            manifestLoadingTimeOut: 30_000,
+            startFragPrefetch: true,
+          });
           engineRef.current = hls;
           hls.loadSource(src);
           hls.attachMedia(video);
           hls.on(Hls.Events.MANIFEST_PARSED, (_e: unknown, d: any) => {
             setLevels(d.levels.map((l: any, i: number) => ({ id: i, label: l.height ? `${l.height}p` : `${Math.round(l.bitrate / 1000)}k` })));
           });
+          let networkRecoveries = 0;
           hls.on(Hls.Events.ERROR, (_e: unknown, d: any) => {
             if (!d.fatal) return;
-            if (d.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
+            if (d.type === Hls.ErrorTypes.NETWORK_ERROR && networkRecoveries < 3) {
+              networkRecoveries += 1;
+              window.setTimeout(() => hls.startLoad(), networkRecoveries * 1_000);
+            }
             else if (d.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
             else setError("This video could not be played.");
           });

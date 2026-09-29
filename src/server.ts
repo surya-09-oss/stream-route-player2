@@ -47,8 +47,7 @@ function isH3SwallowedErrorBody(body: string): boolean {
 // Sites allowed to embed the player (iframe) and call the stream endpoint.
 const EMBED_ORIGINS = [
   "https://pwcacorner.vercel.app",
-  "https://hjsdghsgs.vercel.app",
-  "https://hjkdsjk.vercel.app",
+  "https://hrtgksgdjd.vercel.app",
 ];
 
 function withEmbedHeaders(request: Request, response: Response): Response {

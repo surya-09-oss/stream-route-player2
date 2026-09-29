@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiPublicStreamRouteImport } from './routes/api/public/stream'
+import { Route as WatchBatchIdSubjectIdTopicIdLectureIdRouteImport } from './routes/watch.$batchId.$subjectId.$topicId.$lectureId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -22,31 +23,51 @@ const ApiPublicStreamRoute = ApiPublicStreamRouteImport.update({
   path: '/api/public/stream',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WatchBatchIdSubjectIdTopicIdLectureIdRoute =
+  WatchBatchIdSubjectIdTopicIdLectureIdRouteImport.update({
+    id: '/watch/$batchId/$subjectId/$topicId/$lectureId',
+    path: '/watch/$batchId/$subjectId/$topicId/$lectureId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/api/public/stream': typeof ApiPublicStreamRoute
+  '/watch/$batchId/$subjectId/$topicId/$lectureId': typeof WatchBatchIdSubjectIdTopicIdLectureIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/api/public/stream': typeof ApiPublicStreamRoute
+  '/watch/$batchId/$subjectId/$topicId/$lectureId': typeof WatchBatchIdSubjectIdTopicIdLectureIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/api/public/stream': typeof ApiPublicStreamRoute
+  '/watch/$batchId/$subjectId/$topicId/$lectureId': typeof WatchBatchIdSubjectIdTopicIdLectureIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/api/public/stream'
+  fullPaths:
+    | '/'
+    | '/api/public/stream'
+    | '/watch/$batchId/$subjectId/$topicId/$lectureId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/api/public/stream'
-  id: '__root__' | '/' | '/api/public/stream'
+  to:
+    | '/'
+    | '/api/public/stream'
+    | '/watch/$batchId/$subjectId/$topicId/$lectureId'
+  id:
+    | '__root__'
+    | '/'
+    | '/api/public/stream'
+    | '/watch/$batchId/$subjectId/$topicId/$lectureId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ApiPublicStreamRoute: typeof ApiPublicStreamRoute
+  WatchBatchIdSubjectIdTopicIdLectureIdRoute: typeof WatchBatchIdSubjectIdTopicIdLectureIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -65,12 +86,21 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicStreamRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/watch/$batchId/$subjectId/$topicId/$lectureId': {
+      id: '/watch/$batchId/$subjectId/$topicId/$lectureId'
+      path: '/watch/$batchId/$subjectId/$topicId/$lectureId'
+      fullPath: '/watch/$batchId/$subjectId/$topicId/$lectureId'
+      preLoaderRoute: typeof WatchBatchIdSubjectIdTopicIdLectureIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ApiPublicStreamRoute: ApiPublicStreamRoute,
+  WatchBatchIdSubjectIdTopicIdLectureIdRoute:
+    WatchBatchIdSubjectIdTopicIdLectureIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
