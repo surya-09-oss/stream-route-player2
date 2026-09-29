@@ -1,0 +1,187 @@
+import { createFileRoute } from "@tanstack/react-router";
+
+/**
+ * Same-origin video proxy. The site sends only a video route (e.g. "/videos/42/master.m3u8");
+ * this handler adds the secret token + headers server-side, streams bytes back with
+ * Range support, and rewrites HLS playlists so every segment/key also flows through here.
+ * Only hosts from VIDEO_API_BASE_URL / VIDEO_ALLOWED_HOSTS are reachable (not an open proxy).
+ */
+
+function config() {
+  const clean = (value: string | undefined) => (value ?? "").trim().replace(/^['"]|['"]$/g, "");
+  const base = clean(process.env["VIDEO_API_BASE_URL"]);
+  const tokenEndpoint = clean(process.env["VIDEO_TOKEN_ENDPOINT"]);
+  const token = clean(process.env["VIDEO_API_TOKEN"]);
+  let extra: Record<string, string> = {};
+  try {
+    extra = JSON.parse(process.env["VIDEO_API_HEADERS"] ?? "{}");
+  } catch {
+    extra = {};
+  }
+  const hosts = new Set<string>();
+  for (const rawHost of (process.env["VIDEO_ALLOWED_HOSTS"] ?? "").split(",")) {
+    const entry = clean(rawHost).replace(/^\*\./, "");
+    if (!entry) continue;
+    try {
+      hosts.add(new URL(entry.includes("://") ? entry : `https://${entry}`).hostname.toLowerCase());
+    } catch {
+      /* ignore malformed allow-list entries */
+    }
+  }
+  if (base) {
+    try {
+      hosts.add(new URL(base).host.toLowerCase());
+    } catch {
+      /* invalid base */
+    }
+  }
+  return { base, tokenEndpoint, token, extra, hosts };
+}
+
+type TokenBundle = { accessToken: string; token: string; refreshToken: string; fetchedAt: number };
+let cachedToken: TokenBundle | null = null;
+let pendingToken: Promise<TokenBundle> | null = null;
+
+async function generatedToken(endpoint: string, headers: Record<string, string>, force = false) {
+  if (!force && cachedToken && Date.now() - cachedToken.fetchedAt < 8 * 60 * 1000) return cachedToken;
+  if (!pendingToken) {
+    pendingToken = fetch(`${endpoint}${endpoint.includes("?") ? "&" : "?"}_t=${Date.now()}`, {
+      headers,
+      cache: "no-store",
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Token service returned ${response.status}`);
+        const body = await response.json() as { access_token?: string; token?: string; refresh_token?: string };
+        if (!body.access_token) throw new Error("Token service returned no access token");
+        cachedToken = {
+          accessToken: body.access_token,
+          token: body.token ?? "",
+          refreshToken: body.refresh_token ?? "",
+          fetchedAt: Date.now(),
+        };
+        return cachedToken;
+      })
+      .finally(() => { pendingToken = null; });
+  }
+  return pendingToken;
+}
+
+function hostAllowed(hostname: string, allowed: Set<string>) {
+  const host = hostname.toLowerCase();
+  return [...allowed].some((entry) => host === entry || host.endsWith(`.${entry}`));
+}
+
+function resolveTarget(route: string, base: string) {
+  // Resolve an absolute signed URL independently. A malformed base setting must
+  // not break otherwise valid absolute lecture URLs.
+  try {
+    return new URL(route);
+  } catch {
+    if (!base) return null;
+  }
+
+  try {
+    return new URL(route, base.endsWith("/") ? base : `${base}/`);
+  } catch {
+    return null;
+  }
+}
+
+async function requestHeaders(
+  extra: Record<string, string>,
+  tokenEndpoint: string,
+  staticToken: string,
+  force = false,
+) {
+  const headers = { ...extra };
+  if (tokenEndpoint) {
+    const bundle = await generatedToken(tokenEndpoint, extra, force);
+    headers["Authorization"] = `Bearer ${bundle.accessToken}`;
+    headers["Cookie"] = `auth_token=${bundle.token}; api_barear_access_token=${bundle.accessToken}`;
+    headers["randomid"] = crypto.randomUUID();
+    if (bundle.refreshToken) headers["x-refresh-token"] = bundle.refreshToken;
+  } else if (staticToken) {
+    headers["Authorization"] = `Bearer ${staticToken}`;
+  }
+  return headers;
+}
+
+const proxied = (abs: string) => `/api/public/stream?p=${encodeURIComponent(abs)}`;
+
+function rewritePlaylist(text: string, playlistUrl: string) {
+  return text
+    .split("\n")
+    .map((line) => {
+      const t = line.trim();
+      if (!t) return line;
+      if (t.startsWith("#")) {
+        return line.replace(/URI="([^"]+)"/g, (_m, u) => `URI="${proxied(new URL(u, playlistUrl).href)}"`);
+      }
+      return proxied(new URL(t, playlistUrl).href);
+    })
+    .join("\n");
+}
+
+export const Route = createFileRoute("/api/public/stream")({
+  server: {
+    handlers: {
+      GET: async ({ request }) => {
+        const { base, tokenEndpoint, token, extra, hosts } = config();
+        const p = new URL(request.url).searchParams.get("p");
+        if (!p || p.length > 4000) return new Response("Missing video route", { status: 400 });
+
+        const target = resolveTarget(p, base);
+        if (!target) return new Response("Invalid video route or API base URL", { status: 400 });
+        if (!/^https?:$/.test(target.protocol) || !hostAllowed(target.hostname, hosts)) {
+          return new Response("Host not allowed", { status: 403 });
+        }
+
+        try {
+          let headers = await requestHeaders(extra, tokenEndpoint, token);
+          const range = request.headers.get("range");
+          if (range) headers["Range"] = range;
+
+          let upstream = await fetch(target.href, { headers, redirect: "manual" });
+          if ((upstream.status === 401 || upstream.status === 403) && tokenEndpoint) {
+            headers = await requestHeaders(extra, tokenEndpoint, token, true);
+            if (range) headers["Range"] = range;
+            upstream = await fetch(target.href, { headers, redirect: "manual" });
+          }
+
+          let resolvedUrl = target;
+          for (let redirects = 0; redirects < 5 && upstream.status >= 300 && upstream.status < 400; redirects += 1) {
+            const location = upstream.headers.get("location");
+            if (!location) break;
+            resolvedUrl = new URL(location, resolvedUrl);
+            if (!/^https?:$/.test(resolvedUrl.protocol) || !hostAllowed(resolvedUrl.hostname, hosts)) {
+              return new Response("Redirect host not allowed", { status: 403 });
+            }
+            upstream = await fetch(resolvedUrl, { headers, redirect: "manual" });
+          }
+          const type = upstream.headers.get("content-type") ?? "";
+          // This provider intentionally serves some signed HLS manifests with a
+          // .docx suffix, so treat both suffixes as playlists before streaming.
+          const isPlaylist = /mpegurl/i.test(type) || /\.(m3u8|docx)$/i.test(resolvedUrl.pathname);
+
+          if (isPlaylist && upstream.ok) {
+            const body = rewritePlaylist(await upstream.text(), resolvedUrl.href);
+            return new Response(body, {
+              headers: { "content-type": "application/vnd.apple.mpegurl", "cache-control": "no-store" },
+            });
+          }
+
+          const out = new Headers();
+          for (const h of ["content-type", "content-length", "content-range", "accept-ranges", "last-modified", "etag"]) {
+            const v = upstream.headers.get(h);
+            if (v) out.set(h, v);
+          }
+          out.set("cache-control", "private, max-age=60");
+          return new Response(upstream.body, { status: upstream.status, headers: out });
+        } catch (error) {
+          console.error("Video upstream request failed", error instanceof Error ? error.message : "Unknown error");
+          return new Response("Video service unavailable", { status: 502 });
+        }
+      },
+    },
+  },
+});
