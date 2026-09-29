@@ -108,6 +108,25 @@ async function requestHeaders(
 
 const proxied = (abs: string) => `/api/public/stream?p=${encodeURIComponent(abs)}`;
 
+function corsHeaders(request: Request) {
+  const origin = request.headers.get("origin");
+  const allowed = new Set(["https://pwcacorner.vercel.app", "https://hrtgksgdjd.vercel.app"]);
+  const headers = new Headers();
+  if (origin && allowed.has(origin)) headers.set("access-control-allow-origin", origin);
+  headers.set("access-control-allow-methods", "GET, HEAD, OPTIONS");
+  headers.set("access-control-allow-headers", "range, content-type");
+  headers.set("access-control-expose-headers", "content-length, content-range, accept-ranges");
+  headers.set("access-control-max-age", "86400");
+  headers.set("vary", "origin");
+  return headers;
+}
+
+function responseWithCors(request: Request, body: BodyInit | null, init: ResponseInit = {}) {
+  const headers = new Headers(init.headers);
+  corsHeaders(request).forEach((value, key) => headers.set(key, value));
+  return new Response(body, { ...init, headers });
+}
+
 function rewritePlaylist(text: string, playlistUrl: string) {
   return text
     .split("\n")
@@ -125,15 +144,24 @@ function rewritePlaylist(text: string, playlistUrl: string) {
 export const Route = createFileRoute("/api/public/stream")({
   server: {
     handlers: {
+      OPTIONS: async ({ request }) => responseWithCors(request, null, { status: 204 }),
+      HEAD: async ({ request }) => handleStream(request),
       GET: async ({ request }) => {
+        return handleStream(request);
+      },
+    },
+  },
+});
+
+async function handleStream(request: Request) {
         const { base, tokenEndpoint, token, extra, hosts } = config();
         const p = new URL(request.url).searchParams.get("p");
-        if (!p || p.length > 4000) return new Response("Missing video route", { status: 400 });
+        if (!p || p.length > 4000) return responseWithCors(request, "Missing video route", { status: 400 });
 
         const target = resolveTarget(p, base);
-        if (!target) return new Response("Invalid video route or API base URL", { status: 400 });
+        if (!target) return responseWithCors(request, "Invalid video route or API base URL", { status: 400 });
         if (!/^https?:$/.test(target.protocol) || !hostAllowed(target.hostname, hosts)) {
-          return new Response("Host not allowed", { status: 403 });
+          return responseWithCors(request, "Host not allowed", { status: 403 });
         }
 
         try {
@@ -141,12 +169,21 @@ export const Route = createFileRoute("/api/public/stream")({
           const range = request.headers.get("range");
           if (range) headers["Range"] = range;
 
-          let upstream = await fetch(target.href, { headers, redirect: "manual" });
-          if ((upstream.status === 401 || upstream.status === 403) && tokenEndpoint) {
-            headers = await requestHeaders(extra, tokenEndpoint, token, true);
-            if (range) headers["Range"] = range;
-            upstream = await fetch(target.href, { headers, redirect: "manual" });
+          let upstream: Response | undefined;
+          for (let attempt = 0; attempt < 3; attempt += 1) {
+            if (attempt) {
+              await new Promise((resolve) => setTimeout(resolve, attempt * 250));
+              headers = await requestHeaders(extra, tokenEndpoint, token, true);
+              if (range) headers["Range"] = range;
+            }
+            try {
+              upstream = await fetch(target.href, { headers, redirect: "manual" });
+              if (upstream.ok || (upstream.status < 500 && upstream.status !== 401 && upstream.status !== 403 && upstream.status !== 429)) break;
+            } catch {
+              upstream = undefined;
+            }
           }
+          if (!upstream) return responseWithCors(request, "Video service unavailable", { status: 502 });
 
           let resolvedUrl = target;
           for (let redirects = 0; redirects < 5 && upstream.status >= 300 && upstream.status < 400; redirects += 1) {
@@ -154,7 +191,7 @@ export const Route = createFileRoute("/api/public/stream")({
             if (!location) break;
             resolvedUrl = new URL(location, resolvedUrl);
             if (!/^https?:$/.test(resolvedUrl.protocol) || !hostAllowed(resolvedUrl.hostname, hosts)) {
-              return new Response("Redirect host not allowed", { status: 403 });
+              return responseWithCors(request, "Redirect host not allowed", { status: 403 });
             }
             upstream = await fetch(resolvedUrl, { headers, redirect: "manual" });
           }
@@ -165,7 +202,8 @@ export const Route = createFileRoute("/api/public/stream")({
 
           if (isPlaylist && upstream.ok) {
             const body = rewritePlaylist(await upstream.text(), resolvedUrl.href);
-            return new Response(body, {
+            return responseWithCors(request, request.method === "HEAD" ? null : body, {
+              status: upstream.status,
               headers: { "content-type": "application/vnd.apple.mpegurl", "cache-control": "no-store" },
             });
           }
@@ -175,13 +213,10 @@ export const Route = createFileRoute("/api/public/stream")({
             const v = upstream.headers.get(h);
             if (v) out.set(h, v);
           }
-          out.set("cache-control", "private, max-age=60");
-          return new Response(upstream.body, { status: upstream.status, headers: out });
+          out.set("cache-control", isPlaylist ? "no-store" : "public, max-age=300, stale-while-revalidate=60");
+          return responseWithCors(request, request.method === "HEAD" ? null : upstream.body, { status: upstream.status, headers: out });
         } catch (error) {
           console.error("Video upstream request failed", error instanceof Error ? error.message : "Unknown error");
-          return new Response("Video service unavailable", { status: 502 });
+          return responseWithCors(request, "Video service unavailable", { status: 502 });
         }
-      },
-    },
-  },
-});
+}

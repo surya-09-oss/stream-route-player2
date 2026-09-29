@@ -93,13 +93,13 @@ function hidden(html: string, id: string) {
   return "";
 }
 
-async function decrypt(value: string) {
+async function decrypt(value: string, keyValue: string, ivValue: string) {
   if (!value) return "";
   try {
     const bytes = Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
     const encoder = new TextEncoder();
-    const key = await crypto.subtle.importKey("raw", encoder.encode("R7@kP4#xL9!mQ2$v"), "AES-CBC", false, ["decrypt"]);
-    const clear = await crypto.subtle.decrypt({ name: "AES-CBC", iv: encoder.encode("T3!nW8$qZ5@rK1#p") }, key, bytes);
+    const key = await crypto.subtle.importKey("raw", encoder.encode(keyValue), "AES-CBC", false, ["decrypt"]);
+    const clear = await crypto.subtle.decrypt({ name: "AES-CBC", iv: encoder.encode(ivValue) }, key, bytes);
     return new TextDecoder().decode(clear).trim();
   } catch {
     return "";
@@ -114,6 +114,9 @@ export const resolveLecture = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => lectureIds.parse(input))
   .handler(async ({ data }) => {
     const { playerBase } = config();
+    const streamKey = clean(process.env["VIDEO_STREAM_KEY"]);
+    const streamIv = clean(process.env["VIDEO_STREAM_IV"]);
+    if (streamKey.length !== 16 || streamIv.length !== 16) throw new Error("Video decryption is not configured");
     const detail = await apiGet(
       `/v1/batches/${data.batchId}/subject/${data.subjectId}/schedule/${data.lectureId}/schedule-details`,
     );
@@ -134,15 +137,15 @@ export const resolveLecture = createServerFn({ method: "POST" })
       video_type: "new",
       play_type: "Lecture",
     });
-    const fetchPlayer = (force = false) => fetch(`${playerBase}/play.php?${params.toString()}`, {
-      headers: { ...(force ? {} : {}), ...(await providerHeaders(force)), accept: "text/html,application/xhtml+xml", referer: `${playerBase}/`, origin: playerBase },
+    const fetchPlayer = async (force = false) => fetch(`${playerBase}/play.php?${params.toString()}`, {
+      headers: { ...(await providerHeaders(force)), accept: "text/html,application/xhtml+xml", referer: `${playerBase}/`, origin: playerBase },
       cache: "no-store",
     });
     let response = await fetchPlayer();
     if (response.status === 401 || response.status === 403) response = await fetchPlayer(true);
     if (!response.ok) throw new Error(`Player service returned ${response.status}`);
     const html = await response.text();
-    const route = await decrypt(hidden(html, "enc_video_url"));
+    const route = await decrypt(hidden(html, "enc_video_url"), streamKey, streamIv);
     if (!route) throw new Error("This lecture has no playable stream");
     const path = (route.split("?")[0] ?? "").toLowerCase();
     const format = path.endsWith(".m3u8") || path.endsWith(".docx") ? "hls" : path.endsWith(".mpd") ? "dash" : "mp4";
