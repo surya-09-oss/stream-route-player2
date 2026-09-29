@@ -188,11 +188,18 @@ async function handleStream(request: Request) {
           for (let redirects = 0; redirects < 5 && upstream.status >= 300 && upstream.status < 400; redirects += 1) {
             const location = upstream.headers.get("location");
             if (!location) break;
+            const previousOrigin = resolvedUrl.origin;
             resolvedUrl = new URL(location, resolvedUrl);
             if (!/^https?:$/.test(resolvedUrl.protocol) || !hostAllowed(resolvedUrl.hostname, hosts)) {
               return responseWithCors(request, "Redirect host not allowed", { status: 403 });
             }
-            upstream = await fetch(resolvedUrl, { headers, redirect: "manual" });
+            // Signed CDN URLs carry their authorization in the URL. Forwarding the
+            // API bearer token or session cookie to another origin can make the CDN
+            // reject an otherwise valid signature, especially on deployed workers.
+            const redirectHeaders = resolvedUrl.origin === previousOrigin
+              ? headers
+              : range ? { Range: range } : {};
+            upstream = await fetch(resolvedUrl, { headers: redirectHeaders, redirect: "manual" });
           }
           const type = upstream.headers.get("content-type") ?? "";
           // This provider intentionally serves some signed HLS manifests with a
