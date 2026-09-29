@@ -117,7 +117,7 @@ export const resolveLecture = createServerFn({ method: "POST" })
     const streamKey = clean(process.env["VIDEO_STREAM_KEY"]);
     const streamIv = clean(process.env["VIDEO_STREAM_IV"]);
     if (![16, 24, 32].includes(streamKey.length) || streamIv.length !== 16) {
-      throw new Error("Video decryption is not configured");
+      throw new Error(`Video decryption settings have invalid lengths (${streamKey.length}/${streamIv.length})`);
     }
     const detail = await apiGet(
       `/v1/batches/${data.batchId}/subject/${data.subjectId}/schedule/${data.lectureId}/schedule-details`,
