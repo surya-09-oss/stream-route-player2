@@ -110,9 +110,8 @@ const proxied = (abs: string) => `/api/public/stream?p=${encodeURIComponent(abs)
 
 function corsHeaders(request: Request) {
   const origin = request.headers.get("origin");
-  const allowed = new Set(["https://pwcacorner.vercel.app", "https://hrtgksgdjd.vercel.app"]);
   const headers = new Headers();
-  if (origin && allowed.has(origin)) headers.set("access-control-allow-origin", origin);
+  headers.set("access-control-allow-origin", origin || "*");
   headers.set("access-control-allow-methods", "GET, HEAD, OPTIONS");
   headers.set("access-control-allow-headers", "range, content-type");
   headers.set("access-control-expose-headers", "content-length, content-range, accept-ranges");

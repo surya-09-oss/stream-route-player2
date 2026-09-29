@@ -11,3 +11,4 @@
 
 - Video playback always goes through `/api/public/stream?p=<route>`; absolute routes resolve independently of VIDEO_API_BASE_URL, while relative routes use it, and token/headers come from encrypted video settings. Why: keeps credentials private, permits signed CDN URLs, and restricts proxy hosts.
 - Lecture deep links resolve provider metadata and signed media only inside `resolveLecture`; the browser receives no provider credentials. Why: preserves `/watch/...` compatibility without exposing secrets.
+- Any website may embed the player and read its stream responses, while upstream media hosts remain restricted by `VIDEO_ALLOWED_HOSTS`. Why: supports third-party playback without turning the server into an open proxy.

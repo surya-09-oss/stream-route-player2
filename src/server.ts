@@ -44,14 +44,7 @@ function isH3SwallowedErrorBody(body: string): boolean {
   }
 }
 
-// Sites allowed to embed the player (iframe) and call the stream endpoint.
-const EMBED_ORIGINS = [
-  "https://pwcacorner.vercel.app",
-  "https://hrtgksgdjd.vercel.app",
-];
-
 function withEmbedHeaders(request: Request, response: Response): Response {
-  void EMBED_ORIGINS;
   const headers = new Headers(response.headers);
   headers.delete("x-frame-options");
   // Any site may embed the player.

@@ -8,3 +8,4 @@
 - [x] Verify a real lecture stream resolves to valid H.264/AAC media through the player proxy.
 - [x] Restore the five video configuration secrets in the remix from the uploaded project and verify the proxy mints tokens, resolves routes, and blocks unknown hosts.
 - [x] Restore `/watch/...` lecture resolution, allow both requested external sites, and verify the supplied lecture end-to-end.
+- [x] Allow the player and stream responses to work when embedded on any website.
