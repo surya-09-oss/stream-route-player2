@@ -97,9 +97,14 @@ async function decrypt(value: string, keyValue: string, ivValue: string) {
   if (!value) return "";
   try {
     const bytes = Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
-    const encoder = new TextEncoder();
-    const key = await crypto.subtle.importKey("raw", encoder.encode(keyValue), "AES-CBC", false, ["decrypt"]);
-    const clear = await crypto.subtle.decrypt({ name: "AES-CBC", iv: encoder.encode(ivValue) }, key, bytes);
+    const material = (input: string) => /^[a-f\d]+$/i.test(input) && input.length % 2 === 0
+      ? Uint8Array.from(input.match(/.{2}/g) ?? [], (pair) => Number.parseInt(pair, 16))
+      : new TextEncoder().encode(input);
+    const keyBytes = material(keyValue);
+    const ivBytes = material(ivValue);
+    if (![16, 24, 32].includes(keyBytes.length) || ivBytes.length !== 16) return "";
+    const key = await crypto.subtle.importKey("raw", keyBytes, "AES-CBC", false, ["decrypt"]);
+    const clear = await crypto.subtle.decrypt({ name: "AES-CBC", iv: ivBytes }, key, bytes);
     return new TextDecoder().decode(clear).trim();
   } catch {
     return "";
@@ -116,9 +121,7 @@ export const resolveLecture = createServerFn({ method: "POST" })
     const { playerBase } = config();
     const streamKey = clean(process.env["VIDEO_STREAM_KEY"]);
     const streamIv = clean(process.env["VIDEO_STREAM_IV"]);
-    if (![16, 24, 32].includes(streamKey.length) || streamIv.length !== 16) {
-      throw new Error(`Video decryption settings have invalid lengths (${streamKey.length}/${streamIv.length})`);
-    }
+    if (!streamKey || !streamIv) throw new Error("Video decryption is not configured");
     const detail = await apiGet(
       `/v1/batches/${data.batchId}/subject/${data.subjectId}/schedule/${data.lectureId}/schedule-details`,
     );
