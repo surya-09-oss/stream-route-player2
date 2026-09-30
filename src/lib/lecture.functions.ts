@@ -8,9 +8,6 @@ const lectureIds = z.object({
   lectureId: z.string().min(6).max(64).regex(/^[a-zA-Z0-9_-]+$/),
 });
 
-type TokenBundle = { accessToken: string; token: string; refreshToken: string; fetchedAt: number };
-let cachedToken: TokenBundle | null = null;
-let pendingToken: Promise<TokenBundle> | null = null;
 
 function clean(value: string | undefined) {
   return (value ?? "").trim().replace(/^['"]|['"]$/g, "");
@@ -30,31 +27,10 @@ function config() {
   return { apiBase: apiBase.replace(/\/$/, ""), playerBase: playerBase.replace(/\/$/, ""), tokenEndpoint, extraHeaders };
 }
 
-async function token(endpoint: string, headers: Record<string, string>, force = false) {
-  if (!force && cachedToken && Date.now() - cachedToken.fetchedAt < 8 * 60 * 1000) return cachedToken;
-  if (!pendingToken) {
-    pendingToken = fetch(`${endpoint}${endpoint.includes("?") ? "&" : "?"}_t=${Date.now()}`, {
-      headers,
-      cache: "no-store",
-    }).then(async (response) => {
-      if (!response.ok) throw new Error(`Token service returned ${response.status}`);
-      const body = await response.json() as { access_token?: string; token?: string; refresh_token?: string };
-      if (!body.access_token) throw new Error("Token service returned no access token");
-      cachedToken = {
-        accessToken: body.access_token,
-        token: body.token ?? "",
-        refreshToken: body.refresh_token ?? "",
-        fetchedAt: Date.now(),
-      };
-      return cachedToken;
-    }).finally(() => { pendingToken = null; });
-  }
-  return pendingToken;
-}
-
 async function providerHeaders(force = false) {
   const { tokenEndpoint, extraHeaders } = config();
-  const bundle = await token(tokenEndpoint, extraHeaders, force);
+  const { getProviderToken } = await import("./provider-token.server");
+  const bundle = await getProviderToken(tokenEndpoint, extraHeaders, force);
   return {
     ...extraHeaders,
     authorization: `Bearer ${bundle.accessToken}`,
@@ -67,15 +43,19 @@ async function providerHeaders(force = false) {
 async function apiGet(path: string) {
   const { apiBase } = config();
   let lastStatus = 502;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    if (attempt) await new Promise((resolve) => setTimeout(resolve, attempt * 350));
-    const response = await fetch(`${apiBase}${path}`, { headers: await providerHeaders(attempt > 0), cache: "no-store" });
+  let forceToken = false;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    if (attempt) await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+    const headers: Record<string, string> = await providerHeaders(forceToken);
+    const response: Response = await fetch(`${apiBase}${path}`, { headers, cache: "no-store" });
     lastStatus = response.status;
     if (response.ok) {
       const body = await response.json() as { data?: unknown } & Record<string, unknown>;
       return (body.data ?? body) as Record<string, unknown>;
     }
-    if (response.status < 500 && response.status !== 429 && response.status !== 401 && response.status !== 403) break;
+    // Only a rejected token warrants a new one; 429/5xx just wait and retry.
+    forceToken = response.status === 401 || response.status === 403;
+    if (response.status < 500 && response.status !== 429 && !forceToken) break;
   }
   throw new Error(`Lecture service returned ${lastStatus}`);
 }
