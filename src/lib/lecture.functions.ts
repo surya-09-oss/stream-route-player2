@@ -8,9 +8,6 @@ const lectureIds = z.object({
   lectureId: z.string().min(6).max(64).regex(/^[a-zA-Z0-9_-]+$/),
 });
 
-type TokenBundle = { accessToken: string; token: string; refreshToken: string; fetchedAt: number };
-let cachedToken: TokenBundle | null = null;
-let pendingToken: Promise<TokenBundle> | null = null;
 
 function clean(value: string | undefined) {
   return (value ?? "").trim().replace(/^['"]|['"]$/g, "");
