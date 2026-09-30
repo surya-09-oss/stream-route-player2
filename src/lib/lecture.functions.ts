@@ -46,7 +46,8 @@ async function apiGet(path: string) {
   let forceToken = false;
   for (let attempt = 0; attempt < 4; attempt += 1) {
     if (attempt) await new Promise((resolve) => setTimeout(resolve, attempt * 500));
-    const response = await fetch(`${apiBase}${path}`, { headers: await providerHeaders(forceToken), cache: "no-store" });
+    const headers: Record<string, string> = await providerHeaders(forceToken);
+    const response: Response = await fetch(`${apiBase}${path}`, { headers, cache: "no-store" });
     lastStatus = response.status;
     if (response.ok) {
       const body = await response.json() as { data?: unknown } & Record<string, unknown>;
