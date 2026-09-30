@@ -38,32 +38,18 @@ function config() {
   return { base, tokenEndpoint, token, extra, hosts };
 }
 
-type TokenBundle = { accessToken: string; token: string; refreshToken: string; fetchedAt: number };
-let cachedToken: TokenBundle | null = null;
-let pendingToken: Promise<TokenBundle> | null = null;
-
 async function generatedToken(endpoint: string, headers: Record<string, string>, force = false) {
-  if (!force && cachedToken && Date.now() - cachedToken.fetchedAt < 8 * 60 * 1000) return cachedToken;
-  if (!pendingToken) {
-    pendingToken = fetch(`${endpoint}${endpoint.includes("?") ? "&" : "?"}_t=${Date.now()}`, {
-      headers,
-      cache: "no-store",
-    })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`Token service returned ${response.status}`);
-        const body = await response.json() as { access_token?: string; token?: string; refresh_token?: string };
-        if (!body.access_token) throw new Error("Token service returned no access token");
-        cachedToken = {
-          accessToken: body.access_token,
-          token: body.token ?? "",
-          refreshToken: body.refresh_token ?? "",
-          fetchedAt: Date.now(),
-        };
-        return cachedToken;
-      })
-      .finally(() => { pendingToken = null; });
+  const { getProviderToken } = await import("@/lib/provider-token.server");
+  return getProviderToken(endpoint, headers, force);
+}
+
+/** Provider credentials are only needed by the API host; signed CDN URLs carry their own auth. */
+function needsProviderAuth(target: URL, base: string) {
+  try {
+    return target.host.toLowerCase() === new URL(base).host.toLowerCase();
+  } catch {
+    return false;
   }
-  return pendingToken;
 }
 
 function hostAllowed(hostname: string, allowed: Set<string>) {
@@ -164,16 +150,21 @@ async function handleStream(request: Request) {
         }
 
         try {
-          let headers = await requestHeaders(extra, tokenEndpoint, token);
+          const withAuth = needsProviderAuth(target, base);
           const range = request.headers.get("range");
-          if (range) headers["Range"] = range;
+          const build = async (force: boolean) => {
+            const h: Record<string, string> = withAuth ? await requestHeaders(extra, tokenEndpoint, token, force) : {};
+            if (range) h["Range"] = range;
+            return h;
+          };
+          let headers = await build(false);
 
           let upstream: Response | undefined;
           for (let attempt = 0; attempt < 3; attempt += 1) {
             if (attempt) {
-              await new Promise((resolve) => setTimeout(resolve, attempt * 250));
-              headers = await requestHeaders(extra, tokenEndpoint, token, true);
-              if (range) headers["Range"] = range;
+              await new Promise((resolve) => setTimeout(resolve, attempt * 300));
+              const rejected = upstream?.status === 401 || upstream?.status === 403;
+              headers = await build(withAuth && rejected);
             }
             try {
               upstream = await fetch(target.href, { headers, redirect: "manual" });
