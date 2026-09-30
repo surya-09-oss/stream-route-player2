@@ -119,9 +119,13 @@ export const resolveLecture = createServerFn({ method: "POST" })
   .validator((input: unknown) => lectureIds.parse(input))
   .handler(async ({ data }) => {
     const { playerBase } = config();
-    const streamKey = clean(process.env["VIDEO_STREAM_KEY"]);
-    const streamIv = clean(process.env["VIDEO_STREAM_IV"]);
-    if (!streamKey || !streamIv) throw new Error("Video decryption is not configured");
+    // The provider's player uses fixed decryption constants (originally built into this
+    // project). Env values are optional overrides; defaults are tried as a fallback.
+    const candidates: Array<[string, string]> = [];
+    const envKey = clean(process.env["VIDEO_STREAM_KEY"]);
+    const envIv = clean(process.env["VIDEO_STREAM_IV"]);
+    if (envKey && envIv) candidates.push([envKey, envIv]);
+    candidates.push(["R7@kP4#xL9!mQ2$v", "T3!nW8$qZ5@rK1#p"]);
     const detail = await apiGet(
       `/v1/batches/${data.batchId}/subject/${data.subjectId}/schedule/${data.lectureId}/schedule-details`,
     );
@@ -150,7 +154,12 @@ export const resolveLecture = createServerFn({ method: "POST" })
     if (response.status === 401 || response.status === 403) response = await fetchPlayer(true);
     if (!response.ok) throw new Error(`Player service returned ${response.status}`);
     const html = await response.text();
-    const route = await decrypt(hidden(html, "enc_video_url"), streamKey, streamIv);
+    const encrypted = hidden(html, "enc_video_url");
+    let route = "";
+    for (const [k, iv] of candidates) {
+      const clear = await decrypt(encrypted, k, iv);
+      if (/^https?:\/\//i.test(clear) || clear.startsWith("/")) { route = clear; break; }
+    }
     if (!route) throw new Error("This lecture has no playable stream");
     const path = (route.split("?")[0] ?? "").toLowerCase();
     const format = path.endsWith(".m3u8") || path.endsWith(".docx") ? "hls" : path.endsWith(".mpd") ? "dash" : "mp4";
