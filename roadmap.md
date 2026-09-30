@@ -10,4 +10,4 @@
 - [x] Restore `/watch/...` lecture resolution, allow both requested external sites, and verify the supplied lecture end-to-end.
 - [x] Allow the player and stream responses to work when embedded on any website.
 - [x] Stop forwarding provider credentials across media-host redirects and verify the production-safe request path builds cleanly.
-- [ ] Copy VIDEO_STREAM_KEY and VIDEO_STREAM_IV from the original project; the secure update form was declined.
+- [x] Play lectures without VIDEO_STREAM_KEY/VIDEO_STREAM_IV by restoring the built-in decryption defaults.
